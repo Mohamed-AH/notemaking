@@ -1,13 +1,12 @@
 """
-Lecture Notes Processor Agent
-Automated agent for converting Arabic lecture transcripts to comprehensive formatted notes
+Lecture Notes Processor for Claude Code
+Prepares transcripts for processing within Claude Code environment
 """
 
 import os
 import re
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Tuple
-from anthropic import Anthropic
 from formatter import FormattingRules
 from quality_checker import QualityChecker
 
@@ -25,17 +24,18 @@ class ProcessingResult:
 
 class LectureNotesAgent:
     """
-    Automated agent for converting Arabic lecture transcripts
-    to comprehensive formatted notes.
+    Prepares Arabic lecture transcripts for processing in Claude Code environment.
     """
 
-    def __init__(self, source_folder: str, destination_folder: str, api_key: Optional[str] = None):
+    def __init__(self, source_folder: str, destination_folder: str, working_folder: str = "working"):
         self.source_folder = source_folder
         self.destination_folder = destination_folder
+        self.working_folder = working_folder
         self.formatting_rules = FormattingRules()
 
-        # Initialize Anthropic client
-        self.client = Anthropic(api_key=api_key or os.environ.get("ANTHROPIC_API_KEY"))
+        # Ensure folders exist
+        os.makedirs(working_folder, exist_ok=True)
+        os.makedirs(destination_folder, exist_ok=True)
 
         # Load master prompt template
         template_path = os.path.join(os.path.dirname(__file__), 'master_prompt.txt')
@@ -45,9 +45,9 @@ class LectureNotesAgent:
         else:
             self.master_prompt_template = self._get_default_prompt_template()
 
-    def process_lecture(self, transcript_file: str) -> ProcessingResult:
-        """Main processing pipeline"""
-        print(f"Processing: {transcript_file}")
+    def prepare_lecture(self, transcript_file: str) -> Dict[str, Any]:
+        """Prepare lecture for processing - creates segment files"""
+        print(f"Preparing: {transcript_file}")
 
         # Phase 1: Analysis
         print("  Phase 1: Analyzing transcript...")
@@ -57,44 +57,17 @@ class LectureNotesAgent:
         print("  Phase 2: Creating segmentation plan...")
         plan = self.create_segmentation_plan(analysis)
 
-        # Phase 3: Execution
-        print("  Phase 3: Processing segments...")
-        parts = self.process_segments(transcript_file, plan)
+        # Phase 3: Create segment files
+        print("  Phase 3: Creating segment files...")
+        segment_files = self.create_segment_files(transcript_file, plan, analysis)
 
-        # Phase 4: Merge
-        print("  Phase 4: Merging parts...")
-        comprehensive = self.merge_parts(parts, analysis)
-
-        # Phase 5: Quality Check
-        print("  Phase 5: Quality checking...")
-        quality_checker = QualityChecker(transcript_file)
-        try:
-            validated = quality_checker.validate(comprehensive)
-            quality_score = 100.0
-        except Exception as e:
-            print(f"  Warning: Quality check issues: {e}")
-            validated = comprehensive
-            quality_score = 50.0
-
-        # Phase 6: Output
-        print("  Phase 6: Writing output...")
-        output_path = self.output_file(transcript_file, validated)
-
-        # Calculate statistics
-        word_count = len(validated.split())
-        timestamp_coverage = self._calculate_timestamp_coverage(validated, analysis)
-
-        result = ProcessingResult(
-            output_path=output_path,
-            word_count=word_count,
-            timestamp_coverage=timestamp_coverage,
-            quality_score=quality_score
-        )
-
-        print(f"✓ Completed: {output_path}")
-        print(f"  Words: {word_count}, Coverage: {timestamp_coverage:.1f}%, Quality: {quality_score:.1f}")
-
-        return result
+        return {
+            'transcript_file': transcript_file,
+            'analysis': analysis,
+            'plan': plan,
+            'segment_files': segment_files,
+            'lecture_number': self._extract_lecture_number(os.path.basename(transcript_file))
+        }
 
     def analyze_transcript(self, file: str) -> Dict[str, Any]:
         """Extract structure and metadata"""
@@ -119,8 +92,7 @@ class LectureNotesAgent:
         content = analysis['content']
         lines = content.split('\n')
 
-        # For now, use a simple strategy: split by character count
-        # More sophisticated splitting could be done based on chapters, timestamps, etc.
+        # Split by character count for manageable segments
         max_chars_per_segment = 15000  # ~15k characters per segment
 
         segments = []
@@ -163,156 +135,235 @@ class LectureNotesAgent:
 
         return segments
 
-    def process_segments(self, transcript_file: str, plan: List[Dict[str, Any]]) -> List[str]:
-        """Process each segment sequentially"""
-        parts = []
-
-        for segment in plan:
-            print(f"    Processing part {segment['part_number']}/{len(plan)}...")
-            part = self.process_single_segment(segment, len(plan))
-            parts.append(part)
-
-        return parts
-
-    def process_single_segment(self, segment: Dict[str, Any], total_parts: int) -> str:
-        """Process one segment with full detail capture using Claude API"""
-
-        part_number = segment['part_number']
-        segment_content = segment['content']
-
-        # Create the prompt for this segment
-        prompt = self._create_segment_prompt(segment_content, part_number, total_parts)
-
-        # Call Claude API
-        try:
-            message = self.client.messages.create(
-                model="claude-sonnet-4-5-20250929",
-                max_tokens=16000,
-                temperature=0,
-                messages=[
-                    {
-                        "role": "user",
-                        "content": prompt
-                    }
-                ]
-            )
-
-            # Extract the response
-            response_text = message.content[0].text
-            return response_text
-
-        except Exception as e:
-            print(f"    Error processing segment {part_number}: {e}")
-            # Return formatted error fallback
-            return f"# Part {part_number}\n\n[Error processing this segment: {e}]\n\n```\n{segment_content}\n```"
-
-    def merge_parts(self, parts: List[str], analysis: Dict[str, Any]) -> str:
-        """Combine all parts into comprehensive document"""
-
-        comprehensive = []
-
-        # Title and metadata
-        filename = analysis['filename']
-        lecture_num = self._extract_lecture_number(filename)
-
-        comprehensive.append("# صحيح البخاري | Ṣaḥīḥ Al-Bukhārī")
-        comprehensive.append(f"# Comprehensive Lecture Notes - Lecture {lecture_num}")
-        comprehensive.append("")
-        comprehensive.append("---")
-        comprehensive.append("")
-
-        # Merge parts sequentially
-        for i, part in enumerate(parts):
-            if i > 0:
-                # Add separator between parts
-                comprehensive.append("")
-                comprehensive.append("---")
-                comprehensive.append("")
-
-            comprehensive.append(part)
-
-        return "\n".join(comprehensive)
-
-    def output_file(self, transcript_file: str, content: str) -> str:
-        """Write output file"""
-        # Extract lecture number from filename
+    def create_segment_files(self, transcript_file: str, plan: List[Dict[str, Any]],
+                           analysis: Dict[str, Any]) -> List[str]:
+        """Create work files for each segment"""
         filename = os.path.basename(transcript_file)
         lecture_num = self._extract_lecture_number(filename)
 
-        # Create output filename
-        output_filename = f"lecture_notes_L{lecture_num:02d}_COMPREHENSIVE.md"
-        output_path = os.path.join(self.destination_folder, output_filename)
+        segment_files = []
 
-        # Ensure destination folder exists
-        os.makedirs(self.destination_folder, exist_ok=True)
+        for segment in plan:
+            part_num = segment['part_number']
+            total_parts = len(plan)
 
-        # Write file
-        with open(output_path, 'w', encoding='utf-8') as f:
-            f.write(content)
+            # Create segment file
+            segment_filename = f"L{lecture_num:02d}_PART{part_num}_segment.txt"
+            segment_path = os.path.join(self.working_folder, segment_filename)
 
-        return output_path
+            with open(segment_path, 'w', encoding='utf-8') as f:
+                f.write(segment['content'])
 
-    def _create_segment_prompt(self, segment_content: str, part_number: int, total_parts: int) -> str:
-        """Create prompt for processing a segment"""
+            # Create instruction file
+            instruction_filename = f"L{lecture_num:02d}_PART{part_num}_instructions.md"
+            instruction_path = os.path.join(self.working_folder, instruction_filename)
 
-        prompt = f"""You are an expert Arabic-English bilingual transcription processor specializing in Islamic scholarly lectures. Your task is to convert this raw Arabic lecture transcript segment into comprehensive, professionally formatted notes.
+            instruction_content = self._create_segment_instructions(
+                segment, part_num, total_parts, lecture_num
+            )
 
-This is PART {part_number} of {total_parts}.
+            with open(instruction_path, 'w', encoding='utf-8') as f:
+                f.write(instruction_content)
 
-## STRICT FORMATTING RULES
+            segment_files.append({
+                'part_number': part_num,
+                'segment_file': segment_path,
+                'instruction_file': instruction_path,
+                'output_file': os.path.join(self.working_folder,
+                                           f"L{lecture_num:02d}_PART{part_num}_output.md")
+            })
+
+            print(f"    Created part {part_num}/{total_parts}: {segment_filename}")
+
+        return segment_files
+
+    def _create_segment_instructions(self, segment: Dict[str, Any],
+                                    part_number: int, total_parts: int,
+                                    lecture_num: int) -> str:
+        """Create instruction file for segment processing"""
+
+        return f"""# Processing Instructions for Lecture {lecture_num:02d} - Part {part_number}/{total_parts}
+
+## Task
+Convert this Arabic lecture transcript segment into comprehensive, professionally formatted notes.
+
+## Input File
+`L{lecture_num:02d}_PART{part_number}_segment.txt`
+
+## Output File
+`L{lecture_num:02d}_PART{part_number}_output.md`
+
+## Formatting Rules
 
 ### 1. Headers (Bilingual)
-- # Arabic Title | English Title          (Book level)
-- ## Arabic | English                    (Chapter/Major section)
-- ### Arabic | English                   (Subsection)
+- `# Arabic Title | English Title` (Book level)
+- `## Arabic | English` (Chapter/Major section)
+- `### Arabic | English` (Subsection)
 
 ### 2. Timestamps
-- (MM:SS-MM:SS)    Range format
-- (MM:SS)          Single point format
+- `(MM:SS-MM:SS)` for ranges
+- `(MM:SS)` for single points
 - Every timestamp from source MUST appear in output
+- Place timestamp immediately after section header
 
 ### 3. Text Formatting
 - **Hadith text**: Full Arabic, then full English in bold
 - **Sheikh explanations**: Arabic paragraph, then English translation
-- **Student interactions**: Mark with [Student question] or [Student comment]
+- **Student interactions**: Mark with `[Student question]` or `[Student comment]`
 
 ### 4. Content Capture Rules
 - **Zero additions**: Add NO content not in source
 - **Complete capture**: Miss NO content from source
 - **Preserve tone**: Maintain sheikh's rhetorical style
-- **Include everything**: Main teaching, digressions, side comments, questions, answers, contemporary applications, personal anecdotes, cross-references, variant narrations
+- **Include everything**: Main teaching, digressions, side comments, questions, answers
 
-## TRANSCRIPT SEGMENT
+### 5. Example Format
 
+```markdown
+## الحديث الأول | Hadith 1
+(0:45-5:00)
+
+### الإسناد | Chain of Narration
+
+حَدَّثَنَا الْحُمَيْدِيُّ...
+
+Al-Humaidi narrated to us...
+
+### المتن | Text
+
+إِنَّمَا الأَعْمَالُ بِالنِّيَّاتِ
+
+**"Actions are but by intentions"**
+
+### شرح الشيخ | Sheikh's Explanation
+(4:00-4:45)
+
+هذا الحديث العظيم...
+
+This great hadith...
+
+**[Student question]** (5:00):
+ما معنى النية؟
+What is the meaning of intention?
+
+**Sheikh's answer** (5:15):
+النية محلها القلب...
+The intention is in the heart...
 ```
-{segment_content}
-```
 
-## YOUR TASK
+## Instructions
 
-Process this transcript segment following ALL the rules above. Create comprehensive, well-formatted notes that:
-1. Preserve all Arabic text exactly as written
-2. Provide English translations for all Arabic content
-3. Use bilingual headers with proper markdown hierarchy
-4. Include all timestamps
-5. Capture every detail from the sheikh's teaching
-6. Mark all student interactions clearly
-7. Maintain consistent formatting throughout
+1. Read the segment file: `L{lecture_num:02d}_PART{part_number}_segment.txt`
+2. Process ALL content following the formatting rules above
+3. Preserve all Arabic text exactly as written
+4. Provide English translations for all Arabic content
+5. Use bilingual headers throughout
+6. Include all timestamps
+7. Capture every detail from the transcript
+8. Write output to: `L{lecture_num:02d}_PART{part_number}_output.md`
 
-Begin processing now. Output ONLY the formatted notes, no other commentary."""
+## Critical Reminders
+- Never skip timestamps
+- Never add content not in source
+- Always provide translations
+- Maintain proper hierarchy
+- Preserve Arabic exactly
+- Include everything (digressions, Q&A, side comments)
+"""
 
-        return prompt
+    def merge_parts(self, segment_files: List[Dict[str, Any]], analysis: Dict[str, Any],
+                   lecture_num: int) -> str:
+        """Combine all processed parts into comprehensive document"""
+
+        print(f"Merging {len(segment_files)} parts...")
+
+        comprehensive = []
+
+        # Title and metadata
+        comprehensive.append("# صحيح البخاري | Ṣaḥīḥ Al-Bukhārī")
+        comprehensive.append(f"# Comprehensive Lecture Notes - Lecture {lecture_num:02d}")
+        comprehensive.append("")
+        comprehensive.append("---")
+        comprehensive.append("")
+
+        # Merge parts sequentially
+        for i, segment_info in enumerate(segment_files):
+            output_file = segment_info['output_file']
+
+            if not os.path.exists(output_file):
+                print(f"  Warning: Output file not found: {output_file}")
+                comprehensive.append(f"\n\n**[Part {segment_info['part_number']} - Not yet processed]**\n\n")
+                continue
+
+            with open(output_file, 'r', encoding='utf-8') as f:
+                part_content = f.read()
+
+            if i > 0:
+                comprehensive.append("")
+                comprehensive.append("---")
+                comprehensive.append("")
+
+            comprehensive.append(part_content)
+            print(f"  Merged part {segment_info['part_number']}")
+
+        return "\n".join(comprehensive)
+
+    def finalize_lecture(self, preparation: Dict[str, Any]) -> ProcessingResult:
+        """Finalize and validate the comprehensive notes"""
+
+        lecture_num = preparation['lecture_number']
+        segment_files = preparation['segment_files']
+        analysis = preparation['analysis']
+
+        print(f"\nFinalizing Lecture {lecture_num:02d}...")
+
+        # Merge all parts
+        comprehensive = self.merge_parts(segment_files, analysis, lecture_num)
+
+        # Quality check
+        print("  Running quality checks...")
+        quality_checker = QualityChecker(preparation['transcript_file'])
+        try:
+            validated = quality_checker.validate(comprehensive)
+            quality_score = 100.0
+            print("  ✓ Quality checks passed")
+        except Exception as e:
+            print(f"  ⚠ Quality check warnings: {e}")
+            validated = comprehensive
+            quality_score = 70.0
+
+        # Write final output
+        output_filename = f"lecture_notes_L{lecture_num:02d}_COMPREHENSIVE.md"
+        output_path = os.path.join(self.destination_folder, output_filename)
+
+        with open(output_path, 'w', encoding='utf-8') as f:
+            f.write(validated)
+
+        # Calculate statistics
+        word_count = len(validated.split())
+        timestamp_coverage = self._calculate_timestamp_coverage(validated, analysis)
+
+        result = ProcessingResult(
+            output_path=output_path,
+            word_count=word_count,
+            timestamp_coverage=timestamp_coverage,
+            quality_score=quality_score
+        )
+
+        print(f"\n✓ Completed: {output_path}")
+        print(f"  Words: {word_count}, Coverage: {timestamp_coverage:.1f}%, Quality: {quality_score:.1f}")
+
+        return result
 
     def _extract_duration(self, content: str) -> str:
         """Extract total duration from timestamps"""
         timestamps = re.findall(r'(\d{1,2}:\d{2}(?::\d{2})?)', content)
         if timestamps:
-            return timestamps[-1]  # Last timestamp
+            return timestamps[-1]
         return "Unknown"
 
     def _identify_chapters(self, content: str) -> List[str]:
         """Identify chapter markers"""
-        # Look for common chapter patterns in Arabic
         patterns = [
             r'كتاب\s+[\u0600-\u06FF\s]+',
             r'باب\s+[\u0600-\u06FF\s]+',
@@ -327,7 +378,6 @@ Begin processing now. Output ONLY the formatted notes, no other commentary."""
 
     def _identify_hadith(self, content: str) -> List[int]:
         """Identify hadith numbers"""
-        # Look for hadith number patterns
         patterns = [
             r'(?:الحديث|حديث)\s+(?:رقم\s+)?(\d+)',
             r'Hadith\s+(?:number\s+)?(\d+)',
@@ -348,7 +398,6 @@ Begin processing now. Output ONLY the formatted notes, no other commentary."""
 
     def _extract_lecture_number(self, filename: str) -> int:
         """Extract lecture number from filename"""
-        # Try to find number in filename
         matches = re.findall(r'(\d+)', filename)
         if matches:
             return int(matches[0])
@@ -369,14 +418,4 @@ Begin processing now. Output ONLY the formatted notes, no other commentary."""
 
     def _get_default_prompt_template(self) -> str:
         """Return default prompt template"""
-        return """You are an expert Arabic-English bilingual transcription processor specializing in Islamic scholarly lectures.
-Your task is to convert raw Arabic lecture transcripts into comprehensive, professionally formatted notes.
-
-Follow these strict rules:
-1. Bilingual headers (Arabic | English)
-2. Preserve all timestamps
-3. Include all content with zero additions
-4. Provide English translations for all Arabic
-5. Use proper markdown hierarchy
-6. Mark student interactions clearly
-"""
+        return """Process this Arabic lecture transcript into comprehensive formatted notes following strict bilingual formatting rules."""

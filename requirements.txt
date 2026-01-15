@@ -1,7 +1,4 @@
 # Core dependencies for Lecture Notes Generator
+# No external API dependencies - works with Claude Code environment
 
-# Anthropic Claude API
-anthropic>=0.40.0
-
-# Standard library backports (if needed for older Python versions)
-typing-extensions>=4.0.0
+# Standard library only - no external dependencies needed!

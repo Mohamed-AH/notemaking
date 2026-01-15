@@ -1,13 +1,16 @@
-# Lecture Notes Generator
+# Lecture Notes Generator for Claude Code
 
-Automated system for converting Arabic lecture transcripts into comprehensive, professionally formatted notes using Claude AI.
+Automated system for converting Arabic lecture transcripts into comprehensive, professionally formatted notes using Claude Code (no API key needed!).
 
 ## Overview
 
 This system transforms raw Arabic lecture transcripts (with English translations) into well-structured, bilingual markdown notes following strict formatting rules. It's designed specifically for Islamic scholarly lectures, particularly Sahih Al-Bukhari explanations.
 
+**NEW**: Now works directly with Claude Code - no Anthropic API key required!
+
 ## Features
 
+- **Claude Code Integration**: Uses Claude Code environment directly (no external API calls)
 - **Bilingual Support**: Maintains both Arabic and English in structured format
 - **Timestamp Preservation**: Ensures all timestamps from source appear in output
 - **Quality Assurance**: Built-in validation checks for completeness and accuracy
@@ -20,15 +23,17 @@ This system transforms raw Arabic lecture transcripts (with English translations
 notemaking/
 ├── source_transcripts/      # Input: Place your .txt transcript files here
 ├── outputs/                 # Output: Generated comprehensive notes
-├── working/                 # Temporary: Intermediate processing files
+├── working/                 # Temporary: Segment files for processing
 ├── logs/                    # Quality check logs
 ├── agent/                   # Core processing code
-│   ├── processor.py         # Main agent logic
+│   ├── processor.py         # Main preparation logic
 │   ├── quality_checker.py   # Validation system
 │   ├── formatter.py         # Formatting rules
-│   └── master_prompt.txt    # Claude prompt template
-├── batch_process.py         # Batch processing script
-├── requirements.txt         # Python dependencies
+│   └── master_prompt.txt    # Processing template
+├── batch_process.py         # Batch preparation script
+├── process_segments.py      # Segment processing helper
+├── process_helper.py        # Preparation and finalization helper
+├── example_transcript.txt   # Example input format
 ├── idea.md                  # Detailed procedure documentation
 └── README.md               # This file
 ```
@@ -36,71 +41,89 @@ notemaking/
 ## Prerequisites
 
 1. **Python 3.8+**
-2. **Anthropic API Key** - Get one from https://console.anthropic.com/
+2. **Claude Code** - This system is designed to work within Claude Code environment
 
 ## Installation
 
-1. Clone or download this repository
+No installation needed! The system uses only Python standard library.
 
-2. Install dependencies:
 ```bash
-pip install -r requirements.txt
-```
+# Optional: Install in a virtual environment
+python -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
 
-3. Set up your Anthropic API key:
-```bash
-export ANTHROPIC_API_KEY='your-api-key-here'
-```
-
-Or on Windows:
-```cmd
-set ANTHROPIC_API_KEY=your-api-key-here
+# No dependencies to install!
 ```
 
 ## Usage
 
-### Single File Processing
+The workflow has three main steps:
 
-To process a single transcript file:
+### Step 1: Prepare Transcripts
 
-```python
-from agent.processor import LectureNotesAgent
-
-# Initialize the agent
-agent = LectureNotesAgent(
-    source_folder='source_transcripts',
-    destination_folder='outputs'
-)
-
-# Process a single file
-result = agent.process_lecture('source_transcripts/transcript_01.txt')
-
-print(f"Output: {result.output_path}")
-print(f"Words: {result.word_count}")
-print(f"Quality: {result.quality_score}")
-```
-
-### Batch Processing
-
-To process all transcript files in the source folder:
+First, add your transcript files to `source_transcripts/` folder, then prepare them:
 
 ```bash
+# Prepare all transcripts
 python batch_process.py
+
+# Or prepare a single transcript
+python process_helper.py prepare source_transcripts/transcript_01.txt
 ```
 
-With custom folders:
-```bash
-python batch_process.py --source /path/to/transcripts --output /path/to/outputs
+This creates segment files in the `working/` directory. Each segment includes:
+- `L##_PART#_segment.txt` - The transcript segment
+- `L##_PART#_instructions.md` - Processing instructions
+- `L##_PART#_output.md` - Where output should be written (you'll create this)
+
+### Step 2: Process Segments with Claude Code
+
+Now ask Claude Code to process each segment. You have two options:
+
+**Option A: Ask Claude directly**
+```
+Ask Claude: "Please process all pending lecture segments in the working/ directory.
+For each segment, read the instructions file and segment file, then create the
+formatted output following the rules."
 ```
 
-With API key as argument:
+**Option B: Process segments one by one**
+```
+Ask Claude: "Please process Lecture 01 Part 1 - read working/L01_PART1_instructions.md
+and working/L01_PART1_segment.txt, then create working/L01_PART1_output.md"
+```
+
+**Option C: Use the helper script**
 ```bash
-python batch_process.py --api-key your-api-key-here
+python process_segments.py
+# This lists all pending segments and their status
+```
+
+### Step 3: Finalize Lecture
+
+Once all segments for a lecture are processed:
+
+```bash
+# Finalize lecture 01
+python process_helper.py finalize 1
+
+# This will:
+# - Merge all processed segments
+# - Run quality checks
+# - Generate final comprehensive notes in outputs/
+```
+
+### Check Status
+
+To see which segments are done and which are pending:
+
+```bash
+python process_helper.py list
 ```
 
 ## Input Format
 
-Your transcript files should be in `.txt` format with the following characteristics:
+Your transcript files should be in `.txt` format with:
 
 - **Timestamps**: In format `(MM:SS)` or `(H:MM:SS)` or `(MM:SS-MM:SS)`
 - **Language**: Mixed Arabic and English text
@@ -118,6 +141,8 @@ In the name of Allah, the Most Merciful, the Most Compassionate
 (1:30) حَدَّثَنَا الْحُمَيْدِيُّ...
 ```
 
+See `example_transcript.txt` for a complete example.
+
 ## Output Format
 
 The system generates comprehensive markdown notes with:
@@ -132,12 +157,11 @@ The system generates comprehensive markdown notes with:
 
 The system follows these phases:
 
-1. **Analysis**: Extract structure, timestamps, chapters, hadith numbers
-2. **Planning**: Divide into optimal segments for processing
-3. **Execution**: Process each segment using Claude AI
-4. **Merge**: Combine segments into comprehensive document
-5. **Quality Check**: Validate timestamps, bilingual content, structure
-6. **Output**: Save to destination folder with summary stats
+1. **Preparation**: Extract structure, timestamps, create segments
+2. **Processing**: Claude Code processes each segment following strict rules
+3. **Merging**: Combine segments into comprehensive document
+4. **Quality Check**: Validate timestamps, bilingual content, structure
+5. **Output**: Save to destination folder with summary stats
 
 ## Quality Checks
 
@@ -150,72 +174,84 @@ The system validates:
 - ✓ Arabic preservation (text unchanged)
 - ✓ Formatting consistency (standardized patterns)
 
-## Configuration
+## Example Workflow
 
-### Adjusting Segment Size
+Complete example of processing one transcript:
 
-Edit `processor.py` line 94:
-```python
-max_chars_per_segment = 15000  # Adjust as needed
-```
+```bash
+# 1. Add transcript to source_transcripts/
+cp my_lecture.txt source_transcripts/
 
-### Modifying Prompts
+# 2. Prepare it
+python process_helper.py prepare source_transcripts/my_lecture.txt
 
-Edit `agent/master_prompt.txt` to customize Claude's behavior
+# 3. Check what needs processing
+python process_helper.py list
 
-### Changing Model
+# 4. Ask Claude Code:
+# "Please process all segments for Lecture 01 following the instructions"
 
-Edit `processor.py` line 122:
-```python
-model="claude-sonnet-4-5-20250929"  # Change model as needed
+# 5. After Claude processes all segments, finalize:
+python process_helper.py finalize 1
+
+# 6. Check the output
+cat outputs/lecture_notes_L01_COMPREHENSIVE.md
 ```
 
 ## Troubleshooting
-
-### "No API key provided"
-- Set the `ANTHROPIC_API_KEY` environment variable
-- Or use `--api-key` argument when running
 
 ### "No transcript files found"
 - Ensure `.txt` files are in `source_transcripts/` folder
 - Check file permissions are readable
 
+### "No segments found"
+- Run `python batch_process.py` or `python process_helper.py prepare` first
+
 ### Quality check warnings
-- Review the generated `PROCESSING_REPORT.md` in outputs folder
-- Check logs for specific issues
+- Review the warnings in console output
+- Check the specific timestamps or sections mentioned
 - May need manual review for complex transcripts
 
-### Processing errors
-- Ensure transcript is UTF-8 encoded
-- Check for malformed timestamps
-- Verify Arabic text displays correctly
+### Segment not processed
+- Check if output file exists in `working/` directory
+- Ask Claude Code to process that specific segment
+- Review the instruction file for formatting requirements
+
+## Commands Reference
+
+```bash
+# Preparation
+python batch_process.py                    # Prepare all transcripts
+python process_helper.py prepare FILE      # Prepare one transcript
+python process_helper.py prepare --all     # Prepare all in source_transcripts/
+
+# Status
+python process_helper.py list              # Show all segments and status
+python process_segments.py                 # List pending segments
+
+# Finalization
+python process_helper.py finalize 1        # Finalize lecture 01
+python process_helper.py finalize 2        # Finalize lecture 02
+```
 
 ## Performance
 
-- **Processing time**: ~2-5 minutes per hour of lecture
-- **Token usage**: ~10-30k tokens per lecture hour
+- **Processing time**: Depends on Claude Code processing speed
+- **No API costs**: Uses Claude Code environment directly
 - **Output size**: Typically 5-10x larger than input transcript
 - **Quality**: Publication-ready comprehensive notes
 
-## Batch Processing Report
+## Processing Rules
 
-After batch processing, check `outputs/PROCESSING_REPORT.md` for:
+Each segment is processed following strict rules:
 
-- Success/failure summary
-- Per-file statistics (word count, coverage, quality score)
-- Error details for failed files
-
-## Example Output
-
-From a 69-minute lecture transcript (1,500 words) → Comprehensive notes (8,100 words):
-
-- All 30 hadith captured with full isnad and matn
-- Complete sheikh explanations paragraph-by-paragraph
-- All student Q&A interactions preserved
-- Digressions and side topics included
-- Contemporary applications documented
-- 100% timestamp coverage
-- Consistent bilingual formatting throughout
+1. **Bilingual headers**: All headers have both Arabic and English
+2. **Timestamp preservation**: Every timestamp from source must appear
+3. **Zero additions**: Never add content not in source
+4. **Complete capture**: Never skip any content from source
+5. **Proper formatting**: Follow markdown hierarchy strictly
+6. **Arabic preservation**: Keep all Arabic exactly as written
+7. **Include everything**: Main content, digressions, Q&A, side comments
 
 ## Documentation
 
@@ -227,12 +263,34 @@ For detailed procedure documentation, see `idea.md` which contains:
 - Edge case handling
 - Agent architecture
 
+## Example Output
+
+From a 15-minute lecture transcript (500 words) → Comprehensive notes (2,500 words):
+
+- All hadith captured with full isnad and matn
+- Complete sheikh explanations paragraph-by-paragraph
+- All student Q&A interactions preserved
+- Digressions and side topics included
+- Contemporary applications documented
+- 100% timestamp coverage
+- Consistent bilingual formatting throughout
+
 ## Support
 
 For issues or questions:
 1. Check `idea.md` for detailed documentation
-2. Review the `PROCESSING_REPORT.md` after batch processing
-3. Examine quality check logs in `logs/` folder
+2. Run `python process_helper.py list` to see segment status
+3. Ask Claude Code for help processing specific segments
+
+## Why Claude Code?
+
+Using Claude Code instead of the Anthropic API provides several advantages:
+
+- **No API key needed**: Works directly in Claude Code environment
+- **No API costs**: Free to process as many transcripts as you want
+- **Better context**: Claude Code has full access to files and project structure
+- **Interactive**: Can review and adjust processing in real-time
+- **Flexible**: Easy to modify rules and reprocess segments
 
 ## License
 
