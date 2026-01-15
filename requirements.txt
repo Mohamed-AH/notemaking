@@ -1,0 +1,4 @@
+# Core dependencies for Lecture Notes Generator
+# No external API dependencies - works with Claude Code environment
+
+# Standard library only - no external dependencies needed!
